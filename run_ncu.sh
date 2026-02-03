@@ -1,0 +1,1 @@
+ncu --set full -f --export full_profile.ncu-rep python eval_ncu_with_registration.py

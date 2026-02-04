@@ -219,7 +219,97 @@ def main():
     print("\n=== Generating Summary Heatmap ===")
     generate_heatmap(results, m_values, n_values, output_dir)
     
+    # Generate speedup plot with all (m, n, k) tuples sorted by m*n*k
+    print("\n=== Generating Speedup vs Problem Size Plot ===")
+    generate_speedup_vs_problem_size(results, output_dir)
+    
     print(f"\nAll figures saved to: {output_dir}/")
+
+
+def generate_speedup_vs_problem_size(results, output_dir):
+    """Generate a plot with all (m, n, k) tuples on x-axis sorted by m*n*k, speedup on y-axis."""
+    # Collect all data points
+    all_data = []
+    for (m, n), data in results.items():
+        for i, k in enumerate(data['k']):
+            problem_size = m * n * k
+            ref_time = data['reference'][i]
+            best_time = data['best'][i]
+            reg_time = data['registered'][i]
+            speedup_best = ref_time / best_time
+            speedup_reg = ref_time / reg_time
+            all_data.append({
+                'm': m, 'n': n, 'k': k,
+                'problem_size': problem_size,
+                'speedup_best': speedup_best,
+                'speedup_reg': speedup_reg,
+                'ref_time': ref_time,
+                'best_time': best_time,
+                'reg_time': reg_time,
+            })
+    
+    # Sort by problem size (m * n * k)
+    all_data.sort(key=lambda x: x['problem_size'])
+    
+    # Create x-axis labels and values
+    x_labels = [f"({d['m']},{d['n']},{d['k']})" for d in all_data]
+    x_indices = np.arange(len(all_data))
+    speedup_best = [d['speedup_best'] for d in all_data]
+    speedup_reg = [d['speedup_reg'] for d in all_data]
+    problem_sizes = [d['problem_size'] for d in all_data]
+    
+    # Figure 1: Speedup vs problem size with (m,n,k) labels
+    fig, ax = plt.subplots(figsize=(16, 6))
+    
+    ax.plot(x_indices, speedup_best, 's-', label='Best vs Reference', 
+            linewidth=1.5, markersize=4, color='green', alpha=0.8)
+    ax.plot(x_indices, speedup_reg, '^-', label='Registered vs Reference', 
+            linewidth=1.5, markersize=4, color='orange', alpha=0.8)
+    ax.axhline(y=1.0, color='red', linestyle='--', alpha=0.7, label='Baseline (1x)')
+    
+    ax.set_xlabel('(M, N, K) tuples sorted by M×N×K', fontsize=12)
+    ax.set_ylabel('Speedup (x)', fontsize=12)
+    ax.set_title('Speedup vs Problem Size (all configurations)', fontsize=14)
+    ax.legend(fontsize=10, loc='upper left')
+    ax.grid(True, alpha=0.3)
+    
+    # Set x-axis ticks - show every Nth label to avoid overcrowding
+    n_labels = len(x_labels)
+    if n_labels > 30:
+        step = max(1, n_labels // 20)
+        ax.set_xticks(x_indices[::step])
+        ax.set_xticklabels(x_labels[::step], rotation=45, ha='right', fontsize=8)
+    else:
+        ax.set_xticks(x_indices)
+        ax.set_xticklabels(x_labels, rotation=45, ha='right', fontsize=8)
+    
+    plt.tight_layout()
+    fig_path = os.path.join(output_dir, "speedup_vs_problem_size.png")
+    plt.savefig(fig_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Saved: {fig_path}")
+    
+    # Figure 2: Speedup vs m*n*k (continuous x-axis)
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    ax.scatter(problem_sizes, speedup_best, s=40, label='Best vs Reference', 
+               color='green', alpha=0.7, marker='s')
+    ax.scatter(problem_sizes, speedup_reg, s=40, label='Registered vs Reference', 
+               color='orange', alpha=0.7, marker='^')
+    ax.axhline(y=1.0, color='red', linestyle='--', alpha=0.7, label='Baseline (1x)')
+    
+    ax.set_xlabel('Problem Size (M × N × K)', fontsize=12)
+    ax.set_ylabel('Speedup (x)', fontsize=12)
+    ax.set_title('Speedup vs Problem Size', fontsize=14)
+    ax.legend(fontsize=10, loc='upper left')
+    ax.grid(True, alpha=0.3)
+    ax.set_xscale('log')
+    
+    plt.tight_layout()
+    fig_path = os.path.join(output_dir, "speedup_vs_mnk_scatter.png")
+    plt.savefig(fig_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Saved: {fig_path}")
 
 
 def generate_heatmap(results, m_values, n_values, output_dir):

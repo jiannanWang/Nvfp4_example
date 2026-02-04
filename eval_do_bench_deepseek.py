@@ -47,175 +47,170 @@ def read_shapes_from_csv(csv_path):
     return shapes
 
 
+def load_results_from_csv(csv_path):
+    """Load benchmark results from a CSV file."""
+    results = defaultdict(lambda: {'k': [], 'reference': [], 'best': [], 'registered': [], 'correct_best': [], 'correct_reg': []})
+    with open(csv_path, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            m, n, k = int(row['m']), int(row['n']), int(row['k'])
+            results[(m, n)]['k'].append(k)
+            results[(m, n)]['reference'].append(float(row['reference_time_ms']))
+            results[(m, n)]['best'].append(float(row['best_time_ms']))
+            results[(m, n)]['registered'].append(float(row['registered_time_ms']))
+    return results
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--benchmark_results', type=str, default=None,
+                        help='Path to benchmark_results.csv to load instead of running benchmarks')
+    args = parser.parse_args()
+
     seed = 1111
     output_dir = "benchmark_figures_deepseek"
     shapes_file = "deepseek_shapes.csv"
     os.makedirs(output_dir, exist_ok=True)
 
-    set_seed(seed)
-    _setup_registered_kernel(custom_kernel, compile_kernel)
+    if args.benchmark_results:
+        # Load results from CSV
+        print(f"Loading results from: {args.benchmark_results}")
+        results = load_results_from_csv(args.benchmark_results)
+        m_values = sorted(set(m for m, n in results.keys()))
+        n_values = sorted(set(n for m, n in results.keys()))
+    else:
+        # Run benchmarks
+        set_seed(seed)
+        _setup_registered_kernel(custom_kernel, compile_kernel)
 
-    # Read shapes from CSV file
-    args_dict = read_shapes_from_csv(shapes_file)
-    
-    # Get unique m and n values for heatmap
-    m_values = sorted(set(m for m, n, k, l in args_dict))
-    n_values = sorted(set(n for m, n, k, l in args_dict))
+        # Read shapes from CSV file
+        args_dict = read_shapes_from_csv(shapes_file)
+        
+        # Get unique m and n values for heatmap
+        m_values = sorted(set(m for m, n, k, l in args_dict))
+        n_values = sorted(set(n for m, n, k, l in args_dict))
 
-    print(f"Total configurations to benchmark: {len(args_dict)}")
-    print(f"Unique M values: {len(m_values)}")
-    print(f"Unique N values: {len(n_values)}")
-    
-    # Store results: {(m, n): {'k': [], 'ref': [], 'best': [], 'registered': []}}
-    results = defaultdict(lambda: {'k': [], 'reference': [], 'best': [], 'registered': [], 'correct_best': [], 'correct_reg': []})
-    
-    successful = 0
-    failed = 0
-    
-    for m, n, k, l in args_dict: 
-        try:
-            data = generate_input(m=m, n=n, k=k, l=l, seed=seed)
-            torch.cuda.synchronize()
+        print(f"Total configurations to benchmark: {len(args_dict)}")
+        print(f"Unique M values: {len(m_values)}")
+        print(f"Unique N values: {len(n_values)}")
+        
+        # Store results: {(m, n): {'k': [], 'ref': [], 'best': [], 'registered': []}}
+        results = defaultdict(lambda: {'k': [], 'reference': [], 'best': [], 'registered': [], 'correct_best': [], 'correct_reg': []})
+        
+        successful = 0
+        failed = 0
+        
+        for m, n, k, l in args_dict: 
+            try:
+                data = generate_input(m=m, n=n, k=k, l=l, seed=seed)
+                torch.cuda.synchronize()
 
-            reference_time = triton.testing.do_bench(lambda: ref_kernel(data))
-            result_ref = ref_kernel(data)
-            torch.cuda.synchronize()
+                reference_time = triton.testing.do_bench(lambda: ref_kernel(data))
+                result_ref = ref_kernel(data)
+                torch.cuda.synchronize()
 
-            best_time = triton.testing.do_bench(lambda: custom_kernel(data))
-            result_best = custom_kernel(data)
-            torch.cuda.synchronize()
+                best_time = triton.testing.do_bench(lambda: custom_kernel(data))
+                result_best = custom_kernel(data)
+                torch.cuda.synchronize()
 
-            registered_time = triton.testing.do_bench(lambda: torch.ops.nvfp4_bench._scaled_mm(*data))
-            result_reg = torch.ops.nvfp4_bench._scaled_mm(*data)
-            torch.cuda.synchronize()
+                registered_time = triton.testing.do_bench(lambda: torch.ops.nvfp4_bench._scaled_mm(*data))
+                result_reg = torch.ops.nvfp4_bench._scaled_mm(*data)
+                torch.cuda.synchronize()
 
-            # Check correctness
-            if not torch.allclose(result_ref, result_best):
-                print(f"m={m}, n={n}, k={k}, l={l} - FAILED: Best result does not match reference!")
-                # print L1 distance
-                print("Diff: ", torch.norm(result_ref - result_best))
-                correct_best = False
-            else:
-                correct_best = True
-            if not torch.allclose(result_ref, result_reg):
-                print(f"m={m}, n={n}, k={k}, l={l} - FAILED: Registered result does not match reference!")
-                print("Diff: ", torch.norm(result_ref - result_reg))
-                correct_reg = False
-            else:
-                correct_reg = True
+                # Check correctness
+                if not torch.allclose(result_ref, result_best):
+                    print(f"m={m}, n={n}, k={k}, l={l} - FAILED: Best result does not match reference!")
+                    # print L1 distance
+                    print("Diff: ", torch.norm(result_ref - result_best))
+                    correct_best = False
+                else:
+                    correct_best = True
+                if not torch.allclose(result_ref, result_reg):
+                    print(f"m={m}, n={n}, k={k}, l={l} - FAILED: Registered result does not match reference!")
+                    print("Diff: ", torch.norm(result_ref - result_reg))
+                    correct_reg = False
+                else:
+                    correct_reg = True
 
-            print(f"m={m}, n={n}, k={k}, l={l}")
-            print(f"  Reference time: {reference_time:.4f} ms")
-            print(f"  Best time: {best_time:.4f} ms")
-            print(f"  Registered time: {registered_time:.4f} ms")
-            print(f"  Registration overhead: {registered_time - best_time:.4f} ms")
-            
-            # Store results
-            results[(m, n)]['correct_best'].append(correct_best)
-            results[(m, n)]['correct_reg'].append(correct_reg)
-            results[(m, n)]['k'].append(k)
-            results[(m, n)]['reference'].append(reference_time)
-            results[(m, n)]['best'].append(best_time)
-            results[(m, n)]['registered'].append(registered_time)
-            
-            successful += 1
-        except Exception as e:
-            print(f"m={m}, n={n}, k={k}, l={l} - FAILED: {type(e).__name__}: {e}")
-            failed += 1
-            continue
+                print(f"m={m}, n={n}, k={k}, l={l}")
+                print(f"  Reference time: {reference_time:.4f} ms")
+                print(f"  Best time: {best_time:.4f} ms")
+                print(f"  Registered time: {registered_time:.4f} ms")
+                print(f"  Registration overhead: {registered_time - best_time:.4f} ms")
+                
+                # Store results
+                results[(m, n)]['correct_best'].append(correct_best)
+                results[(m, n)]['correct_reg'].append(correct_reg)
+                results[(m, n)]['k'].append(k)
+                results[(m, n)]['reference'].append(reference_time)
+                results[(m, n)]['best'].append(best_time)
+                results[(m, n)]['registered'].append(registered_time)
+                
+                successful += 1
+            except Exception as e:
+                print(f"m={m}, n={n}, k={k}, l={l} - FAILED: {type(e).__name__}: {e}")
+                failed += 1
+                continue
+        
+        # save results to CSV
+        save_results_to_csv(results, output_dir)
+        
+        print(f"\n=== Summary ===")
+        print(f"Successful: {successful}/{len(args_dict)}")
+        print(f"Failed: {failed}/{len(args_dict)}")
     
-    # save results to CSV
-    save_results_to_csv(results, output_dir)
-    
-    print(f"\n=== Summary ===")
-    print(f"Successful: {successful}/{len(args_dict)}")
-    print(f"Failed: {failed}/{len(args_dict)}")
-    # Aggregate across all (m, n) pairs
-    all_correct_best = []
-    all_registered = []
-    all_reference = []
-    for data in results.values():
-        all_correct_best.extend(data['correct_best'])
-        all_registered.extend(data['registered'])
-        all_reference.extend(data['reference'])
-    # How many registered kernels are correct?
-    print(f"Correct best: {sum(all_correct_best)}/{len(all_correct_best)}")
-    # how many registered kernels are faster than ref?
-    faster_count = sum(r < ref for r, ref in zip(all_registered, all_reference))
-    print(f"Registered faster than ref: {faster_count}/{len(all_registered)}")
-    
-    # Generate figures for each (m, n) pair
-    print(f"\n=== Generating Figures ===")
+    # Reorganize results by (n, k) for figures with m on x-axis
+    results_by_nk = defaultdict(lambda: {'m': [], 'reference': [], 'best': [], 'registered': []})
     for (m, n), data in results.items():
-        if len(data['k']) == 0:
+        for i, k in enumerate(data['k']):
+            results_by_nk[(n, k)]['m'].append(m)
+            results_by_nk[(n, k)]['reference'].append(data['reference'][i])
+            results_by_nk[(n, k)]['best'].append(data['best'][i])
+            results_by_nk[(n, k)]['registered'].append(data['registered'][i])
+    
+    # Generate figures for each (n, k) pair with m on x-axis
+    print(f"\n=== Generating Figures (fixed N, K; M on x-axis) ===")
+    for (n, k), data in results_by_nk.items():
+        if len(data['m']) == 0:
             continue
             
-        # Sort by k for proper
-    
-    # Generate figures for each (m, n) pair
-    print(f"\n=== Generating Figures ===")
-    for (m, n), data in results.items():
-        if len(data['k']) == 0:
-            continue
-            
-        # Sort by k for proper line plots
-        sorted_indices = np.argsort(data)
-
-    
-    # Generate figures for each (m, n) pair
-    print(f"\n=== Generating Figures ===")
-    for (m, n), data in results.items():
-        if len(data['k']) == 0:
-            continue
-    
-    print(f"\n=== Summary ===")
-    print(f"Successful: {successful}/{len(args_dict)}")
-    print(f"Failed: {failed}/{len(args_dict)}")
-    
-    # Generate figures for each (m, n) pair
-    print(f"\n=== Generating Figures ===")
-    for (m, n), data in results.items():
-        if len(data['k']) == 0:
-            continue
-            
-        # Sort by k for proper line plots
-        sorted_indices = np.argsort(data['k'])
-        k_values = np.array(data['k'])[sorted_indices]
+        # Sort by m for proper line plots
+        sorted_indices = np.argsort(data['m'])
+        m_vals = np.array(data['m'])[sorted_indices]
         ref_times = np.array(data['reference'])[sorted_indices]
         best_times = np.array(data['best'])[sorted_indices]
         reg_times = np.array(data['registered'])[sorted_indices]
         
         fig, axes = plt.subplots(1, 2, figsize=(14, 5))
         
-        # Plot 1: Execution time vs K
+        # Plot 1: Execution time vs M
         ax1 = axes[0]
-        ax1.plot(k_values, ref_times, 'o-', label='Reference', linewidth=2, markersize=6)
-        ax1.plot(k_values, best_times, 's-', label='Best (Custom)', linewidth=2, markersize=6)
-        ax1.plot(k_values, reg_times, '^-', label='Registered', linewidth=2, markersize=6)
-        ax1.set_xlabel('K', fontsize=12)
+        ax1.plot(m_vals, ref_times, 'o-', label='Reference', linewidth=2, markersize=6)
+        ax1.plot(m_vals, best_times, 's-', label='Best (Custom)', linewidth=2, markersize=6)
+        ax1.plot(m_vals, reg_times, '^-', label='Registered', linewidth=2, markersize=6)
+        ax1.set_xlabel('M', fontsize=12)
         ax1.set_ylabel('Time (ms)', fontsize=12)
-        ax1.set_title(f'Execution Time vs K\n(M={m}, N={n})', fontsize=14)
+        ax1.set_title(f'Execution Time vs M\n(N={n}, K={k})', fontsize=14)
         ax1.legend(fontsize=10)
         ax1.grid(True, alpha=0.3)
         
-        # Plot 2: Speedup vs K
+        # Plot 2: Speedup vs M
         ax2 = axes[1]
         speedup_best = ref_times / best_times
         speedup_reg = ref_times / reg_times
-        ax2.plot(k_values, speedup_best, 's-', label='Best vs Reference', linewidth=2, markersize=6, color='green')
-        ax2.plot(k_values, speedup_reg, '^-', label='Registered vs Reference', linewidth=2, markersize=6, color='orange')
+        ax2.plot(m_vals, speedup_best, 's-', label='Best vs Reference', linewidth=2, markersize=6, color='green')
+        ax2.plot(m_vals, speedup_reg, '^-', label='Registered vs Reference', linewidth=2, markersize=6, color='orange')
         ax2.axhline(y=1.0, color='red', linestyle='--', alpha=0.7, label='Baseline (1x)')
-        ax2.set_xlabel('K', fontsize=12)
+        ax2.set_xlabel('M', fontsize=12)
         ax2.set_ylabel('Speedup (x)', fontsize=12)
-        ax2.set_title(f'Speedup vs K\n(M={m}, N={n})', fontsize=14)
+        ax2.set_title(f'Speedup vs M\n(N={n}, K={k})', fontsize=14)
         ax2.legend(fontsize=10)
         ax2.grid(True, alpha=0.3)
         
         plt.tight_layout()
         
         # Save figure
-        fig_path = os.path.join(output_dir, f"benchmark_m{m}_n{n}.png")
+        fig_path = os.path.join(output_dir, f"benchmark_n{n}_k{k}.png")
         plt.savefig(fig_path, dpi=150, bbox_inches='tight')
         plt.close(fig)
         print(f"Saved: {fig_path}")

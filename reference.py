@@ -13,11 +13,20 @@ def ceil_div(a, b):
 def to_blocked(input_matrix):
     rows, cols = input_matrix.shape
 
-    # Please ensure rows and cols are multiples of 128 and 4 respectively
+    # Pad rows and cols to be multiples of 128 and 4 respectively
     n_row_blocks = ceil_div(rows, 128)
     n_col_blocks = ceil_div(cols, 4)
-
-    padded = input_matrix
+    
+    padded_rows = n_row_blocks * 128
+    padded_cols = n_col_blocks * 4
+    
+    # Pad the input matrix if necessary
+    if rows != padded_rows or cols != padded_cols:
+        padded = torch.zeros((padded_rows, padded_cols), dtype=input_matrix.dtype, device=input_matrix.device)
+        padded[:rows, :cols] = input_matrix
+    else:
+        padded = input_matrix
+    
     blocks = padded.view(n_row_blocks, 128, n_col_blocks, 4).permute(0, 2, 1, 3)
     rearranged = blocks.reshape(-1, 4, 32, 4).transpose(1, 2).reshape(-1, 32, 16)
 

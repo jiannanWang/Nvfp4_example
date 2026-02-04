@@ -15,10 +15,12 @@ pip install -r requirements.txt
 | `best_submission.py` | Custom NVFP4 GEMM kernel using CuTe/CUTLASS |
 | `reference.py` | Reference implementation using `torch._scaled_mm` |
 | `eval_do_bench.py` | Benchmark script using Triton's `do_bench` |
+| `eval_do_bench_deepseek.py` | Benchmark script for DeepSeek model shapes |
 | `eval_ncu.py` | Script for NCU profiling |
 | `plot_bench_results.py` | Parse and visualize benchmark results |
 | `utils.py` | Utility functions (seeding, tensor comparison) |
 | `task.py` | Type definitions |
+| `deepseek_shapes.csv` | Matrix shapes (m, n, k, l) for DeepSeek model benchmarks |
 
 ## Usage
 
@@ -37,9 +39,21 @@ bash run_overhead.sh
 ```
 
 This script:
-1. Runs `eval_do_bench.py` and saves output to `results.txt`
+1. Runs `eval_do_bench.py` and saves output to `logs/results.txt`
 2. Parses results and generates `output.png` with time comparisons
 
+### 3. Run DeepSeek Benchmark
+
+```bash
+python eval_do_bench_deepseek.py
+```
+
+This script:
+1. Reads matrix shapes from `deepseek_shapes.csv`
+2. Benchmarks reference, custom, and registered kernels for each shape
+3. Checks correctness against the reference implementation
+4. Saves results to `benchmark_figures_deepseek/benchmark_results.csv`
+5. Prints a summary of successful/failed runs and performance comparisons
 
 ## Benchmark Output
 
